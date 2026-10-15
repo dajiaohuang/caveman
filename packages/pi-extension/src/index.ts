@@ -118,6 +118,7 @@ export default function (pi: ExtensionAPI) {
   let pendingContext: string[] = [];
   let pendingBytes = 0;
   let gateDone = false;
+  let warnedUnavailableToolShrink = false;
 
   const notify = (ctx: ExtensionContext | undefined, message: string, kind: "warning" | "info") => {
     if (ctx?.hasUI) ctx.ui.notify(message, kind);
@@ -175,6 +176,7 @@ export default function (pi: ExtensionAPI) {
     router ??= new ProviderRouter(pi, (message, kind) => notify(ctx, message, kind));
     // A new/resumed/forked session replaces the runtime; reset everything.
     gateDone = false;
+    warnedUnavailableToolShrink = false;
     coreContext = undefined;
     pendingContext = [];
     pendingBytes = 0;
@@ -191,6 +193,7 @@ export default function (pi: ExtensionAPI) {
     const start = await bridge.call("SessionStart", { session_id: sessionId });
     coreContext = additionalContextOf(start);
     if (!start) {
+      warnedUnavailableToolShrink = true;
       // No native runtime reachable means no Core and no lifecycle decisions;
       // routing without them would be compression theater.
       gateDone = true;
@@ -208,10 +211,12 @@ export default function (pi: ExtensionAPI) {
     const recoveryReady = published ? await recovery.ensure() : false;
     gateDone = true;
     if (!published) {
+      warnedUnavailableToolShrink = true;
       notify(ctx, "Caveman: direct mode, no compression this session (local proxy not running)", "warning");
       return;
     }
     if (!published.recoveryViaMcp || !recoveryReady) {
+      warnedUnavailableToolShrink = true;
       notify(ctx, "Caveman: direct mode, no compression this session (recovery not available — run `caveman doctor pi`)", "warning");
       return;
     }
@@ -307,8 +312,12 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  pi.on("tool_result", GUARD_tool_result((event: Parameters<typeof shrinkToolResult>[2]) =>
-    event.toolName === RECOVERY_TOOL || !recoveryCallable() ? undefined : shrinkToolResult(bridge, sessionId, event, recovery)));
+  pi.on("tool_result", GUARD_tool_result((event: Parameters<typeof shrinkToolResult>[2], ctx: ExtensionContext) =>
+    event.toolName === RECOVERY_TOOL || !recoveryCallable() ? undefined : shrinkToolResult(bridge, sessionId, event, recovery, () => {
+      if (warnedUnavailableToolShrink) return;
+      warnedUnavailableToolShrink = true;
+      notify(ctx, "Caveman: native hook returned no usable reply; tool output stayed unchanged", "warning");
+    })));
 
   pi.on("session_before_compact", GUARD_session_before_compact(() => { void bridge.call("PreCompact", { session_id: sessionId }); }));
 

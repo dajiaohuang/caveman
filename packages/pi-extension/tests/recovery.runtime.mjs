@@ -210,8 +210,8 @@ const outputEvent = (text = KNOWN_BYTES) => ({
   toolName: "read_file", input: {}, isError: false,
   content: [{ type: "text", text }, { type: "image", data: "cGl4ZWxz", mimeType: "image/png" }],
 });
-const shrink = (recovery, response, event = outputEvent()) =>
-  shrinkToolResult({ call: async () => response }, "publication-test", event, recovery);
+const shrink = (recovery, response, event = outputEvent(), onUnavailable) =>
+  shrinkToolResult({ call: async () => response }, "publication-test", event, recovery, onUnavailable);
 
 test("publication accepts only one exact recoverable identity across every advertised reference", async () => {
   const { path, cleanup } = shim();
@@ -288,6 +288,19 @@ test("invalid or failed verification proofs keep original output", async () => {
       });
     }
   } finally { cleanup(); }
+});
+
+test("empty native replies report unavailable shrinking, while ordinary no-replacement replies stay quiet", async () => {
+  const { path, cleanup } = shim();
+  const recovery = new RecoveryClient(path);
+  let warnings = 0;
+  const onUnavailable = () => { warnings++; };
+  try {
+    assert.equal(await shrink(recovery, undefined, outputEvent(), onUnavailable), undefined);
+    assert.equal(warnings, 1);
+    assert.equal(await shrink(recovery, {}, outputEvent(), onUnavailable), undefined);
+    assert.equal(warnings, 1, "a valid native response with no replacement is not a runtime outage");
+  } finally { recovery.dispose(); cleanup(); }
 });
 
 test("unavailable recovery and thrown failures leave tool results untouched", async () => {

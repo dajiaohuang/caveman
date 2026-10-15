@@ -16,6 +16,7 @@ export async function shrinkToolResult(
   sessionId: string,
   event: ToolResultEvent,
   recovery: Pick<RecoveryClient, "verify">,
+  onUnavailable?: () => void,
 ): Promise<ToolResultPatch | undefined> {
   const text = event.content
     .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
@@ -32,6 +33,7 @@ export async function shrinkToolResult(
       tool_input: event.input,
       tool_output: text,
     });
+    if (!response) onUnavailable?.();
     const proposed = outputReplacementOf(response);
     if (!proposed || Buffer.byteLength(proposed, "utf8") > MAX_OUTPUT_REPLACEMENT_BYTES) return undefined;
     let handle = normalizeRecoveryHandle(response?.recovery_ref);
